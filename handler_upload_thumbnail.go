@@ -1,10 +1,12 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -33,7 +35,12 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
 
 	const maxMemory = 10 << 20
-	r.ParseMultipartForm(maxMemory)
+	err = r.ParseMultipartForm(maxMemory)
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "flop parsing form", err)
+		return
+	}
+
 	file, header, err := r.FormFile("thumbnail")
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Unable to parse form file", err)
@@ -41,12 +48,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	defer file.Close()
 	media_type := header.Header.Get("Content-Type")
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		respondWithError(w, http.StatusBadRequest, "Flop parsing multi-part file", err)
-		return
-	}
 
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
@@ -58,8 +59,34 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	encoded := base64.StdEncoding.EncodeToString(data)
-	url := fmt.Sprintf("data:%s;base64,%s", media_type, encoded)
+	mt, _, err := mime.ParseMediaType(media_type)
+	if err != nil || (mt != "image/jpeg" && mt != "image/png") {
+		respondWithError(w, http.StatusBadRequest, "unsupported file format", err)
+		return
+	}
+
+	extensions, err := mime.ExtensionsByType(mt)
+	if err != nil || len(extensions) == 0 {
+		respondWithError(w, http.StatusBadRequest, "flop content-type", err)
+		return
+	}
+	extension := extensions[0]
+
+	tnPath := filepath.Join(cfg.assetsRoot, videoID.String()+extension)
+	assetFile, err := os.Create(tnPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "flop creating path", err)
+		return
+	}
+	defer assetFile.Close()
+
+	_, err = io.Copy(assetFile, file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "flop copying data", err)
+		return
+	}
+
+	url := fmt.Sprintf("http://localhost:%s/assets/%s%s", cfg.port, video.ID.String(), extension)
 	video.ThumbnailURL = &url
 
 	err = cfg.db.UpdateVideo(video)
