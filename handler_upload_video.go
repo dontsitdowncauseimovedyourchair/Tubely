@@ -11,6 +11,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/tools"
 	"github.com/google/uuid"
 )
 
@@ -86,6 +87,12 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	ratio, err := tools.GetVideoAspectRatio(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "flop uploading", err)
+		return
+	}
+
 	randstuff := make([]byte, 32)
 	_, err = rand2.Read(randstuff)
 	if err != nil {
@@ -93,7 +100,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	encoded := base64.RawURLEncoding.EncodeToString(randstuff)
-	filename := encoded + ".mp4"
+	filename := ratio + "/" + encoded + ".mp4"
 
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
