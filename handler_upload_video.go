@@ -93,6 +93,20 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	newPath, err := tools.ProcessVideoForFastStreaming(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "flop uploading", err)
+		return
+	}
+
+	toUpload, err := os.Open(newPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "flop uploading", err)
+		return
+	}
+	defer toUpload.Close()
+	defer os.Remove(toUpload.Name())
+
 	randstuff := make([]byte, 32)
 	_, err = rand2.Read(randstuff)
 	if err != nil {
@@ -105,7 +119,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         &filename,
-		Body:        tempFile,
+		Body:        toUpload,
 		ContentType: &mediaType,
 	})
 	if err != nil {
@@ -121,4 +135,6 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "flop saving upload", err)
 		return
 	}
+
+	respondWithJSON(w, http.StatusOK, video)
 }
