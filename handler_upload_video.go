@@ -8,9 +8,12 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
+	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/database"
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/tools"
 	"github.com/google/uuid"
 )
@@ -127,7 +130,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	videoURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, filename)
+	videoURL := fmt.Sprintf("%s,%s", cfg.s3Bucket, filename)
 	video.VideoURL = &videoURL
 
 	err = cfg.db.UpdateVideo(video)
@@ -136,5 +139,26 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	video, err = cfg.dbVideoToSignedVideo(video)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "flop generating url", err)
+		return
+	}
+
 	respondWithJSON(w, http.StatusOK, video)
+}
+
+func (cfg *apiConfig) dbVideoToSignedVideo(video database.Video) (database.Video, error) {
+	components := strings.SplitN(*video.VideoURL, ",", 2)
+	if len(components) < 2 {
+		return video, fmt.Errorf("flop videoURL")
+	}
+	bucket := components[0]
+	key := components[1]
+	presignedURL, err := tools.GeneratePresignedURL(cfg.s3Client, bucket, key, 30*time.Minute)
+	if err != nil {
+		return video, fmt.Errorf("flop generating presigned url: %w", err)
+	}
+	video.VideoURL = &presignedURL
+	return video, nil
 }
